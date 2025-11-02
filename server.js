@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -16,6 +15,16 @@ app.use(express.json());
 let transactions = new Map();
 let soldeDistributeur = 0;
 let soldeUtilisateur = 50.00;
+
+// Fonction pour générer un ID court
+function genererIdCourt() {
+  const caracteres = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let resultat = '';
+  for (let i = 0; i < 6; i++) {
+    resultat += caracteres.charAt(Math.floor(Math.random() * caracteres.length));
+  }
+  return resultat;
+}
 
 // Routes API
 app.get('/api/health', (req, res) => {
@@ -37,7 +46,8 @@ app.post('/api/transaction', (req, res) => {
       });
     }
 
-    const transactionId = 'TXN_' + uuidv4();
+    // Générer un ID court (ex: "A1B2C3")
+    const transactionId = genererIdCourt();
     
     const transaction = {
       id: transactionId,
