@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -17,9 +16,14 @@ let transactions = new Map();
 let soldeDistributeur = 0;
 let soldeUtilisateur = 50.00;
 
-// Générer un ID court
+// Générer un ID court sans dépendance externe
 function genererIdCourt() {
-  return Math.random().toString(36).substring(2, 10).toUpperCase();
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'TX';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
 }
 
 // Routes API
@@ -42,7 +46,7 @@ app.post('/api/transaction', (req, res) => {
       });
     }
 
-    const transactionId = 'TX' + genererIdCourt();
+    const transactionId = genererIdCourt();
     
     const transaction = {
       id: transactionId,
@@ -238,4 +242,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Serveur backend démarré sur le port ${PORT}`);
   console.log(`📍 URL: http://0.0.0.0:${PORT}`);
   console.log(`✅ CORS configuré pour toutes les origines`);
+  console.log(`✅ Prêt à recevoir des transactions!`);
 });
