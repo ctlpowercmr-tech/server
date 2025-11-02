@@ -5,17 +5,22 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
+// Middleware - AUTORISE TOUTES LES ORIGINES POUR LE TEST
 app.use(cors({
-  origin: ['https://ctl-distributeur.netlify.app', 'https://ctl-duseur.netlify.app', 'http://localhost:3000'],
+  origin: '*', // Autorise toutes les origines pour les tests
   credentials: true
 }));
 app.use(express.json());
 
-// Stockage en mémoire avec solde modifiable
+// Stockage en mémoire
 let transactions = new Map();
 let soldeDistributeur = 0;
-let soldeUtilisateur = 0; // Commence à 0, l'utilisateur devra recharger
+let soldeUtilisateur = 50.00;
+
+// Générer un ID court
+function genererIdCourt() {
+  return Math.random().toString(36).substring(2, 10).toUpperCase();
+}
 
 // Routes API
 app.get('/api/health', (req, res) => {
@@ -25,16 +30,6 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-
-// Générer un ID de transaction court
-function genererIdCourt() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
 
 app.post('/api/transaction', (req, res) => {
   try {
@@ -47,7 +42,7 @@ app.post('/api/transaction', (req, res) => {
       });
     }
 
-    const transactionId = genererIdCourt();
+    const transactionId = 'TX' + genererIdCourt();
     
     const transaction = {
       id: transactionId,
@@ -178,7 +173,7 @@ app.post('/api/transaction/:id/annuler', (req, res) => {
 });
 
 // NOUVELLE ROUTE : Recharger le solde utilisateur
-app.post('/api/solde/recharger', (req, res) => {
+app.post('/api/solde/utilisateur/recharger', (req, res) => {
   try {
     const { montant } = req.body;
     
@@ -202,7 +197,7 @@ app.post('/api/solde/recharger', (req, res) => {
     console.error('Erreur rechargement:', error);
     res.status(500).json({
       success: false,
-      error: 'Erreur lors du rechargement'
+      error: 'Erreur interne du serveur'
     });
   }
 });
@@ -242,4 +237,5 @@ setInterval(() => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Serveur backend démarré sur le port ${PORT}`);
   console.log(`📍 URL: http://0.0.0.0:${PORT}`);
+  console.log(`✅ CORS configuré pour toutes les origines`);
 });
