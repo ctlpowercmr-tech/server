@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -11,20 +12,10 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Stockage en mémoire
+// Stockage en mémoire avec solde modifiable
 let transactions = new Map();
 let soldeDistributeur = 0;
-let soldeUtilisateur = 50.00;
-
-// Fonction pour générer un ID court
-function genererIdCourt() {
-  const caracteres = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let resultat = '';
-  for (let i = 0; i < 6; i++) {
-    resultat += caracteres.charAt(Math.floor(Math.random() * caracteres.length));
-  }
-  return resultat;
-}
+let soldeUtilisateur = 0; // Commence à 0, l'utilisateur devra recharger
 
 // Routes API
 app.get('/api/health', (req, res) => {
@@ -34,6 +25,16 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Générer un ID de transaction court
+function genererIdCourt() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 8; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
 
 app.post('/api/transaction', (req, res) => {
   try {
@@ -46,7 +47,6 @@ app.post('/api/transaction', (req, res) => {
       });
     }
 
-    // Générer un ID court (ex: "A1B2C3")
     const transactionId = genererIdCourt();
     
     const transaction = {
@@ -177,6 +177,36 @@ app.post('/api/transaction/:id/annuler', (req, res) => {
   }
 });
 
+// NOUVELLE ROUTE : Recharger le solde utilisateur
+app.post('/api/solde/recharger', (req, res) => {
+  try {
+    const { montant } = req.body;
+    
+    if (!montant || montant <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Montant invalide'
+      });
+    }
+    
+    soldeUtilisateur += parseFloat(montant);
+    
+    console.log(`Rechargement solde: +${montant}€, Nouveau solde: ${soldeUtilisateur}€`);
+    
+    res.json({
+      success: true,
+      nouveauSolde: soldeUtilisateur,
+      message: `Votre solde a été rechargé de ${montant}€`
+    });
+  } catch (error) {
+    console.error('Erreur rechargement:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur lors du rechargement'
+    });
+  }
+});
+
 app.get('/api/solde/distributeur', (req, res) => {
   res.json({
     success: true,
@@ -207,15 +237,6 @@ setInterval(() => {
     console.log(`Nettoyage: ${nbSupprimes} transactions expirées supprimées`);
   }
 }, 60 * 60 * 1000);
-
-// Gestion des erreurs non capturées
-process.on('uncaughtException', (error) => {
-  console.error('Exception non capturée:', error);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Rejet non géré:', reason);
-});
 
 // Démarrage du serveur
 app.listen(PORT, '0.0.0.0', () => {
