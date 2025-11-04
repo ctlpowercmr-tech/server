@@ -1,7 +1,7 @@
 {
   "name": "distributeur-backend",
   "version": "1.0.0",
-  "description": "API pour système distributeur automatique",
+  "description": "API pour système distributeur automatique avec PostgreSQL",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
