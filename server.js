@@ -13,7 +13,7 @@ const pool = new Pool({
 
 // Middleware
 app.use(cors({
-  origin: '*',
+  origin: ['https://ctl-distributeur.netlify.app', 'https://ctl-duseur.netlify.app', 'http://localhost:3000', '*'],
   credentials: true
 }));
 app.use(express.json());
@@ -23,35 +23,35 @@ async function initialiserBaseDeDonnees() {
   try {
     console.log('🔧 Initialisation de la base de données...');
     
-    // Créer la table des transactions
+    // Création de la table transactions
     await pool.query(`
       CREATE TABLE IF NOT EXISTS transactions (
         id VARCHAR(50) PRIMARY KEY,
         montant DECIMAL(10,2) NOT NULL,
+        statut VARCHAR(20) NOT NULL DEFAULT 'en_attente',
         boissons JSONB NOT NULL,
-        statut VARCHAR(20) NOT NULL,
         date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        date_expiration TIMESTAMP,
-        date_paiement TIMESTAMP
+        date_expiration TIMESTAMP NOT NULL,
+        date_paiement TIMESTAMP,
+        UNIQUE(id)
       )
     `);
     
-    // Créer la table des soldes
+    // Création de la table soldes
     await pool.query(`
       CREATE TABLE IF NOT EXISTS soldes (
-        type VARCHAR(50) PRIMARY KEY,
-        solde DECIMAL(10,2) NOT NULL DEFAULT 0,
+        id VARCHAR(50) PRIMARY KEY DEFAULT 'unique',
+        solde_distributeur DECIMAL(10,2) DEFAULT 0,
+        solde_utilisateur DECIMAL(10,2) DEFAULT 50.00,
         date_maj TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
     
-    // Initialiser les soldes s'ils n'existent pas
+    // Insérer les soldes initiaux s'ils n'existent pas
     await pool.query(`
-      INSERT INTO soldes (type, solde) 
-      VALUES 
-        ('distributeur', 0),
-        ('utilisateur', 50)
-      ON CONFLICT (type) DO NOTHING
+      INSERT INTO soldes (id, solde_distributeur, solde_utilisateur) 
+      VALUES ('unique', 0, 50.00) 
+      ON CONFLICT (id) DO NOTHING
     `);
     
     console.log('✅ Base de données initialisée avec succès');
@@ -61,6 +61,16 @@ async function initialiserBaseDeDonnees() {
   }
 }
 
+// Générer un ID court
+function genererIdCourt() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'TX';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 // Routes API
 app.get('/api/health', async (req, res) => {
   try {
@@ -68,14 +78,14 @@ app.get('/api/health', async (req, res) => {
     await pool.query('SELECT 1');
     res.json({ 
       status: 'OK', 
-      message: 'API et Base de données fonctionnelles',
+      message: 'API et base de données fonctionnelles',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
+    console.error('Erreur health check:', error);
     res.status(500).json({
       status: 'ERROR',
-      message: 'Erreur base de données',
-      error: error.message
+      message: 'Problème de connexion à la base de données'
     });
   }
 });
@@ -95,30 +105,20 @@ app.post('/api/transaction', async (req, res) => {
       });
     }
 
-    // Générer un ID court
-    const genererIdCourt = () => {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      let result = 'TX';
-      for (let i = 0; i < 6; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      return result;
-    };
-
     const transactionId = genererIdCourt();
     const dateExpiration = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     
     // Insérer la transaction
     const result = await client.query(
-      `INSERT INTO transactions (id, montant, boissons, statut, date_expiration)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO transactions (id, montant, boissons, date_expiration) 
+       VALUES ($1, $2, $3, $4) 
        RETURNING *`,
-      [transactionId, parseFloat(montant), JSON.stringify(boissons), 'en_attente', dateExpiration]
+      [transactionId, parseFloat(montant), JSON.stringify(boissons), dateExpiration]
     );
     
     await client.query('COMMIT');
     
-    console.log(`Nouvelle transaction: ${transactionId}, Montant: ${montant}€`);
+    console.log(`Nouvelle transaction créée: ${transactionId}, Montant: ${montant}€`);
     
     res.json({
       success: true,
@@ -153,7 +153,7 @@ app.get('/api/transaction/:id', async (req, res) => {
       });
     }
     
-    let transaction = result.rows[0];
+    const transaction = result.rows[0];
     
     // Vérifier l'expiration
     if (new Date() > new Date(transaction.date_expiration) && transaction.statut === 'en_attente') {
@@ -186,7 +186,7 @@ app.post('/api/transaction/:id/payer', async (req, res) => {
   try {
     await client.query('BEGIN');
     
-    // Récupérer la transaction
+    // Vérifier la transaction
     const transactionResult = await client.query(
       'SELECT * FROM transactions WHERE id = $1 FOR UPDATE',
       [req.params.id]
@@ -210,16 +210,15 @@ app.post('/api/transaction/:id/payer', async (req, res) => {
       });
     }
     
-    // Récupérer le solde utilisateur
+    // Vérifier le solde utilisateur
     const soldeResult = await client.query(
-      'SELECT solde FROM soldes WHERE type = $1 FOR UPDATE',
-      ['utilisateur']
+      'SELECT * FROM soldes WHERE id = $1 FOR UPDATE',
+      ['unique']
     );
     
-    const soldeUtilisateur = parseFloat(soldeResult.rows[0].solde);
+    const soldes = soldeResult.rows[0];
     
-    // Vérifier le solde utilisateur
-    if (soldeUtilisateur < transaction.montant) {
+    if (soldes.solde_utilisateur < transaction.montant) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
@@ -228,32 +227,17 @@ app.post('/api/transaction/:id/payer', async (req, res) => {
     }
     
     // Effectuer le paiement
-    const nouveauSoldeUtilisateur = soldeUtilisateur - parseFloat(transaction.montant);
-    
-    // Mettre à jour le solde utilisateur
-    await client.query(
-      'UPDATE soldes SET solde = $1, date_maj = CURRENT_TIMESTAMP WHERE type = $2',
-      [nouveauSoldeUtilisateur, 'utilisateur']
-    );
-    
-    // Mettre à jour le solde distributeur
-    const soldeDistributeurResult = await client.query(
-      'SELECT solde FROM soldes WHERE type = $1 FOR UPDATE',
-      ['distributeur']
-    );
-    
-    const soldeDistributeur = parseFloat(soldeDistributeurResult.rows[0].solde);
-    const nouveauSoldeDistributeur = soldeDistributeur + parseFloat(transaction.montant);
+    const nouveauSoldeUtilisateur = parseFloat(soldes.solde_utilisateur) - parseFloat(transaction.montant);
+    const nouveauSoldeDistributeur = parseFloat(soldes.solde_distributeur) + parseFloat(transaction.montant);
     
     await client.query(
-      'UPDATE soldes SET solde = $1, date_maj = CURRENT_TIMESTAMP WHERE type = $2',
-      [nouveauSoldeDistributeur, 'distributeur']
+      'UPDATE soldes SET solde_utilisateur = $1, solde_distributeur = $2 WHERE id = $3',
+      [nouveauSoldeUtilisateur, nouveauSoldeDistributeur, 'unique']
     );
     
-    // Mettre à jour le statut de la transaction
     await client.query(
-      'UPDATE transactions SET statut = $1, date_paiement = CURRENT_TIMESTAMP WHERE id = $2',
-      ['paye', transaction.id]
+      'UPDATE transactions SET statut = $1, date_paiement = $2 WHERE id = $3',
+      ['paye', new Date(), transaction.id]
     );
     
     await client.query('COMMIT');
@@ -266,7 +250,7 @@ app.post('/api/transaction/:id/payer', async (req, res) => {
         ...transaction,
         boissons: JSON.parse(transaction.boissons),
         statut: 'paye',
-        date_paiement: new Date().toISOString()
+        date_paiement: new Date()
       },
       nouveauSoldeUtilisateur: nouveauSoldeUtilisateur
     });
@@ -296,11 +280,13 @@ app.post('/api/transaction/:id/annuler', async (req, res) => {
       });
     }
     
+    const transaction = result.rows[0];
+    
     res.json({
       success: true,
       data: {
-        ...result.rows[0],
-        boissons: JSON.parse(result.rows[0].boissons)
+        ...transaction,
+        boissons: JSON.parse(transaction.boissons)
       }
     });
   } catch (error) {
@@ -329,19 +315,17 @@ app.post('/api/solde/utilisateur/recharger', async (req, res) => {
       });
     }
     
-    // Récupérer le solde actuel
     const soldeResult = await client.query(
-      'SELECT solde FROM soldes WHERE type = $1 FOR UPDATE',
-      ['utilisateur']
+      'SELECT * FROM soldes WHERE id = $1 FOR UPDATE',
+      ['unique']
     );
     
-    const soldeActuel = parseFloat(soldeResult.rows[0].solde);
-    const nouveauSolde = soldeActuel + parseFloat(montant);
+    const soldes = soldeResult.rows[0];
+    const nouveauSolde = parseFloat(soldes.solde_utilisateur) + parseFloat(montant);
     
-    // Mettre à jour le solde
     await client.query(
-      'UPDATE soldes SET solde = $1, date_maj = CURRENT_TIMESTAMP WHERE type = $2',
-      [nouveauSolde, 'utilisateur']
+      'UPDATE soldes SET solde_utilisateur = $1 WHERE id = $2',
+      [nouveauSolde, 'unique']
     );
     
     await client.query('COMMIT');
@@ -367,14 +351,18 @@ app.post('/api/solde/utilisateur/recharger', async (req, res) => {
 
 app.get('/api/solde/distributeur', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT solde FROM soldes WHERE type = $1',
-      ['distributeur']
-    );
+    const result = await pool.query('SELECT solde_distributeur FROM soldes WHERE id = $1', ['unique']);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Soldes non trouvés'
+      });
+    }
     
     res.json({
       success: true,
-      solde: parseFloat(result.rows[0].solde)
+      solde: parseFloat(result.rows[0].solde_distributeur)
     });
   } catch (error) {
     console.error('Erreur récupération solde distributeur:', error);
@@ -387,14 +375,18 @@ app.get('/api/solde/distributeur', async (req, res) => {
 
 app.get('/api/solde/utilisateur', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT solde FROM soldes WHERE type = $1',
-      ['utilisateur']
-    );
+    const result = await pool.query('SELECT solde_utilisateur FROM soldes WHERE id = $1', ['unique']);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Soldes non trouvés'
+      });
+    }
     
     res.json({
       success: true,
-      solde: parseFloat(result.rows[0].solde)
+      solde: parseFloat(result.rows[0].solde_utilisateur)
     });
   } catch (error) {
     console.error('Erreur récupération solde utilisateur:', error);
@@ -405,24 +397,24 @@ app.get('/api/solde/utilisateur', async (req, res) => {
   }
 });
 
-// Nettoyage des transactions expirées toutes les heures
-setInterval(async () => {
+// Nettoyage des transactions expirées
+async function nettoyerTransactionsExpirees() {
   try {
     const result = await pool.query(
       `UPDATE transactions 
        SET statut = 'expire' 
-       WHERE date_expiration < CURRENT_TIMESTAMP 
-       AND statut = 'en_attente'
-       RETURNING id`
+       WHERE statut = 'en_attente' 
+       AND date_expiration < $1`,
+      [new Date()]
     );
     
-    if (result.rows.length > 0) {
-      console.log(`Nettoyage: ${result.rows.length} transactions expirées`);
+    if (result.rowCount > 0) {
+      console.log(`Nettoyage: ${result.rowCount} transactions expirées`);
     }
   } catch (error) {
-    console.error('Erreur nettoyage transactions expirées:', error);
+    console.error('Erreur nettoyage transactions:', error);
   }
-}, 60 * 60 * 1000);
+}
 
 // Démarrage du serveur
 async function demarrerServeur() {
@@ -430,17 +422,37 @@ async function demarrerServeur() {
     // Initialiser la base de données
     await initialiserBaseDeDonnees();
     
+    // Nettoyer les transactions expirées au démarrage
+    await nettoyerTransactionsExpirees();
+    
+    // Planifier le nettoyage toutes les heures
+    setInterval(nettoyerTransactionsExpirees, 60 * 60 * 1000);
+    
     // Démarrer le serveur
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Serveur backend démarré sur le port ${PORT}`);
       console.log(`📍 URL: http://0.0.0.0:${PORT}`);
       console.log(`🗄️  Base de données PostgreSQL connectée`);
-      console.log(`✅ Prêt à recevoir des transactions!`);
+      console.log(`✅ Prêt à recevoir des requêtes!`);
     });
   } catch (error) {
-    console.error('❌ Impossible de démarrer le serveur:', error);
+    console.error('❌ Erreur démarrage serveur:', error);
     process.exit(1);
   }
 }
 
+// Gestion propre de l'arrêt
+process.on('SIGINT', async () => {
+  console.log('🛑 Arrêt du serveur en cours...');
+  await pool.end();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('🛑 Arrêt du serveur en cours...');
+  await pool.end();
+  process.exit(0);
+});
+
+// Démarrer le serveur
 demarrerServeur();
