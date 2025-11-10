@@ -1,11 +1,10 @@
 {
-  "name": "distributeur-backend",
+  "name": "ctlpower-backend",
   "version": "1.0.0",
-  "description": "API pour système distributeur automatique avec PostgreSQL",
+  "description": "API CTL-Power avec PostgreSQL pour distributeur automatique",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "init-db": "node init-db.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
