@@ -5,17 +5,11 @@ const { pool, testerConnexionBDD, initialiserBDD } = require('./database');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware - AUTORISE TOUTES LES ORIGINES
-app.use(cors({
-  origin: '*',
-  credentials: true
-}));
+app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json());
 
-// Variables globales
 let estConnecteBDD = false;
 
-// Middleware pour vérifier la connexion BDD
 app.use(async (req, res, next) => {
   if (!estConnecteBDD) {
     estConnecteBDD = await testerConnexionBDD();
@@ -29,10 +23,9 @@ app.use(async (req, res, next) => {
   next();
 });
 
-// Générer un ID court
 function genererIdCourt() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = 'TX';
+  let result = 'CTL';
   for (let i = 0; i < 6; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
@@ -48,7 +41,7 @@ app.get('/api/health', async (req, res) => {
     
     res.json({ 
       status: 'OK', 
-      message: 'API et Base de données fonctionnelles',
+      message: 'API CTL-Power fonctionnelle',
       timestamp: new Date().toISOString(),
       bdd: 'CONNECTÉE'
     });
@@ -74,7 +67,7 @@ app.post('/api/transaction', async (req, res) => {
     }
 
     const transactionId = genererIdCourt();
-    const dateExpiration = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const dateExpiration = new Date(Date.now() + 10 * 60 * 1000);
     
     const client = await pool.connect();
     
@@ -96,7 +89,7 @@ app.post('/api/transaction', async (req, res) => {
       dateExpiration: result.rows[0].date_expiration
     };
     
-    console.log(`Nouvelle transaction: ${transactionId}, Montant: ${montant}€`);
+    console.log(`Nouvelle transaction CTL: ${transactionId}, Montant: ${montant}FCFA`);
     
     res.json({
       success: true,
@@ -131,7 +124,6 @@ app.get('/api/transaction/:id', async (req, res) => {
     
     const transaction = result.rows[0];
     
-    // Vérifier l'expiration
     if (new Date() > new Date(transaction.date_expiration) && transaction.statut === 'en_attente') {
       await pool.query(
         'UPDATE transactions SET statut = $1 WHERE id = $2',
@@ -169,7 +161,6 @@ app.post('/api/transaction/:id/payer', async (req, res) => {
   try {
     await client.query('BEGIN');
     
-    // Vérifier la transaction
     const transactionResult = await client.query(
       'SELECT * FROM transactions WHERE id = $1 FOR UPDATE',
       [req.params.id]
@@ -193,7 +184,6 @@ app.post('/api/transaction/:id/payer', async (req, res) => {
       });
     }
     
-    // Vérifier le solde utilisateur
     const soldeResult = await client.query(
       'SELECT solde FROM soldes WHERE id = $1',
       ['utilisateur']
@@ -209,20 +199,16 @@ app.post('/api/transaction/:id/payer', async (req, res) => {
       });
     }
     
-    // Effectuer le paiement
-    // 1. Mettre à jour le statut de la transaction
     await client.query(
       'UPDATE transactions SET statut = $1, date_paiement = NOW() WHERE id = $2',
       ['paye', transaction.id]
     );
     
-    // 2. Débiter l'utilisateur
     await client.query(
       'UPDATE soldes SET solde = solde - $1, updated_at = NOW() WHERE id = $2',
       [transaction.montant, 'utilisateur']
     );
     
-    // 3. Créditer le distributeur
     await client.query(
       'UPDATE soldes SET solde = solde + $1, updated_at = NOW() WHERE id = $2',
       [transaction.montant, 'distributeur']
@@ -230,9 +216,8 @@ app.post('/api/transaction/:id/payer', async (req, res) => {
     
     await client.query('COMMIT');
     
-    console.log(`Paiement réussi: ${transaction.id}`);
+    console.log(`Paiement CTL réussi: ${transaction.id}`);
     
-    // Récupérer le nouveau solde utilisateur
     const nouveauSoldeResult = await client.query(
       'SELECT solde FROM soldes WHERE id = $1',
       ['utilisateur']
@@ -306,7 +291,7 @@ app.post('/api/transaction/:id/annuler', async (req, res) => {
 
 app.post('/api/solde/utilisateur/recharger', async (req, res) => {
   try {
-    const { montant } = req.body;
+    const { montant, operateur } = req.body;
     
     if (!montant || montant <= 0) {
       return res.status(400).json({
@@ -326,12 +311,12 @@ app.post('/api/solde/utilisateur/recharger', async (req, res) => {
     
     const nouveauSolde = parseFloat(result.rows[0].solde);
     
-    console.log(`Rechargement solde: +${montant}€, Nouveau solde: ${nouveauSolde}€`);
+    console.log(`Rechargement ${operateur || 'Mobile Money'}: +${montant}FCFA, Nouveau solde: ${nouveauSolde}FCFA`);
     
     res.json({
       success: true,
       nouveauSolde: nouveauSolde,
-      message: `Votre solde a été rechargé de ${montant}€`
+      message: `Rechargement ${operateur ? operateur + ' ' : ''}réussi de ${montant}FCFA`
     });
   } catch (error) {
     console.error('Erreur rechargement:', error);
@@ -394,42 +379,21 @@ app.get('/api/solde/utilisateur', async (req, res) => {
   }
 });
 
-// Nettoyage des transactions expirées toutes les heures
-setInterval(async () => {
-  try {
-    const client = await pool.connect();
-    
-    const result = await client.query(
-      'UPDATE transactions SET statut = $1 WHERE statut = $2 AND date_expiration < NOW()',
-      ['expire', 'en_attente']
-    );
-    
-    client.release();
-    
-    if (result.rowCount > 0) {
-      console.log(`Nettoyage: ${result.rowCount} transactions expirées`);
-    }
-  } catch (error) {
-    console.error('Erreur nettoyage transactions:', error);
-  }
-}, 60 * 60 * 1000);
-
-// Ping périodique pour garder le serveur actif
+// Maintenance serveur
 setInterval(async () => {
   try {
     const client = await pool.connect();
     await client.query('SELECT 1');
     client.release();
-    console.log('🔄 Serveur maintenu actif - Ping PostgreSQL');
+    console.log('🔄 Serveur CTL-Power maintenu actif');
   } catch (error) {
-    console.error('❌ Erreur ping serveur:', error);
+    console.error('❌ Erreur maintenance serveur:', error);
   }
-}, 300000); // Toutes les 5 minutes
+}, 300000);
 
 // Démarrage du serveur
 async function demarrerServeur() {
   try {
-    // Initialiser la base de données
     const bddInitialisee = await initialiserBDD();
     
     if (!bddInitialisee) {
@@ -437,14 +401,13 @@ async function demarrerServeur() {
       process.exit(1);
     }
     
-    // Tester la connexion
     estConnecteBDD = await testerConnexionBDD();
     
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Serveur backend démarré sur le port ${PORT}`);
+      console.log(`🚀 Serveur CTL-Power démarré sur le port ${PORT}`);
       console.log(`📍 URL: http://0.0.0.0:${PORT}`);
       console.log(`✅ PostgreSQL: ${estConnecteBDD ? 'CONNECTÉ' : 'DÉCONNECTÉ'}`);
-      console.log(`🔄 Maintenance active: SERVEUR TOUJOURS EN LIGNE`);
+      console.log(`🔄 Mode: SERVEUR TOUJOURS ACTIF`);
     });
   } catch (error) {
     console.error('❌ Erreur démarrage serveur:', error);
