@@ -1,16 +1,13 @@
 const { Pool } = require('pg');
 
-// Configuration de la connexion PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  // Configuration pour garder la connexion active
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
-  max: 20, // Maximum de connexions dans le pool
+  max: 20,
 });
 
-// Test de connexion à la base de données
 async function testerConnexionBDD() {
   try {
     const client = await pool.connect();
@@ -23,12 +20,10 @@ async function testerConnexionBDD() {
   }
 }
 
-// Initialiser la base de données
 async function initialiserBDD() {
   try {
     const client = await pool.connect();
     
-    // Créer la table des transactions
     await client.query(`
       CREATE TABLE IF NOT EXISTS transactions (
         id VARCHAR(20) PRIMARY KEY,
@@ -42,7 +37,6 @@ async function initialiserBDD() {
       )
     `);
     
-    // Créer la table des soldes
     await client.query(`
       CREATE TABLE IF NOT EXISTS soldes (
         id VARCHAR(20) PRIMARY KEY,
@@ -51,12 +45,11 @@ async function initialiserBDD() {
       )
     `);
     
-    // Insérer les soldes initiaux s'ils n'existent pas
     await client.query(`
       INSERT INTO soldes (id, solde) 
       VALUES 
         ('distributeur', 0.00),
-        ('utilisateur', 50.00)
+        ('utilisateur', 5000.00)
       ON CONFLICT (id) DO NOTHING
     `);
     
@@ -69,17 +62,16 @@ async function initialiserBDD() {
   }
 }
 
-// Garder la connexion active
+// Maintenance de la connexion
 setInterval(async () => {
   try {
     const client = await pool.connect();
     await client.query('SELECT 1');
     client.release();
-    console.log('🔄 Connexion PostgreSQL maintenue active');
   } catch (error) {
     console.error('❌ Erreur maintenance connexion:', error);
   }
-}, 300000); // Toutes les 5 minutes
+}, 300000);
 
 module.exports = {
   pool,
